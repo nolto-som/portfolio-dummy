@@ -6,38 +6,33 @@ const bodyParser = require('body-parser');
 
 const app = express();
 app.set('view engine', 'ejs');
-app.use(bodyParser.urlencoded({ extended: true }));
+
 app.use(express.static('public'));
 
-const port = 1234
+const port = process.env.port || 1234
 
 app.listen(port, () =>{
     console.log(`Server is Running on port ${port}`);
 })
 
+app.use(bodyParser.urlencoded({ extended: true }));
 const multer = require('multer');
 const path = require('path');
 
 // Configure multer for file uploads
+const fs = require('fs');
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
-        cb(null, 'public/images'); // Directory to save the uploaded images
+        const dir = 'public/images';
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+        cb(null, dir);
     },
     filename: function (req, file, cb) {
-        // Log the newImageName for debugging
-        console.log("New image name from form:", req.body.newImageName);
-        
-        // Get the new image name from the form input
-        const newImageName = req.body.newImageName ? req.body.newImageName.trim() : 'default-image-name';
-        
-        // Preserve the original file extension
+        const newImageName = req.body.newImageName || 'default-image-name';
         const extension = path.extname(file.originalname);
-        
-        // Use the new image name and log the final filename
-        const finalImageName = `${newImageName}${extension}`;
-        console.log("Final image name to be saved:", finalImageName);
-        
-        cb(null, finalImageName); // Save file with the new name
+        cb(null, `${newImageName}${extension}`);
     }
 });
 
@@ -50,6 +45,8 @@ const db = mysql.createConnection({
     password: process.env.password,
     database: process.env.database,
     port: process.env.port,
+    reconnect: true,
+  connectTimeout: 10000, // Optional: 10-second timeout
 })
 db.connect((error) =>{
     if(error){
@@ -60,6 +57,20 @@ db.connect((error) =>{
     console.log('Database is Connected...')
 })
 
+function handleDisconnect() {
+    connection.on('error', (err) => {
+      if (err.code === 'PROTOCOL_CONNECTION_LOST') {
+        console.error('Database connection lost. Reconnecting...');
+        // Recreate the connection
+        handleDisconnect();
+      } else {
+        throw err;
+      }
+    });
+  }
+  
+  // Initialize auto-reconnect
+  handleDisconnect();
 
 // Routes
 // Home Route
@@ -74,6 +85,12 @@ app.get('/projects', (req, res) => {
         if (err) throw err;
         res.render('projects', { projects: results });
     });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).send('Something went wrong!');
 });
 
 //
